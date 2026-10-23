@@ -1,0 +1,95 @@
+# ==========================================
+# Archivos de entorno y credenciales (Seguridad)
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+*.cert
+
+# ==========================================
+# Base de datos local (SQLite)
+# ==========================================
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/backend/data/*.sqlite
+
+# ==========================================
+# Reglas para Markdown (.md)
+# ==========================================
+# Excluir todos los archivos Markdown
+*.md
+**/*.md
+
+# Permitir explícitamente solo README.md y DECISIONS.md en cualquier nivel
+!README.md
+!**/README.md
+!DECISIONS.md
+!**/DECISIONS.md
+
+# ==========================================
+# Exclusiones de OpenCode e IA
+# ==========================================
+.opencode/
+.opencode
+
+# ==========================================
+# Node / Dependencias
+# ==========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# ==========================================
+# Compilación y Artefactos de Build
+# ==========================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.vite/
+*.tsbuildinfo
+
+# ==========================================
+# Pruebas y Cobertura
+# ==========================================
+coverage/
+.nyc_output/
+.vitest/
+
+# ==========================================
+# Editores y Sistema Operativo (Windows/macOS)
+# ==========================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code / JetBrains
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
