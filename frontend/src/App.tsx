@@ -1,122 +1,65 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useState } from 'react';
+import { InlineMath } from 'react-katex';
+import 'katex/dist/katex.min.css';
+import './App.css';
 
-function App() {
-  const [count, setCount] = useState(0)
+type Step = 'MAIN_ACTIVITY' | 'THEORY' | 'REINFORCEMENT' | 'COMPLETED';
+interface Pathway {
+  topics: { id: number; title: string; status: 'COMPLETED' | 'IN_PROGRESS' | 'LOCKED' }[];
+  progress: { currentTopicId: number; currentStep: Step; completed: boolean; theoryViewed: boolean };
+  activity: { id: string; type: string; prompt: string; options: { id: string; text: string }[] } | null;
+  theory: string | null;
+  attempts: { activityId: string; selectedOptionId: string; isCorrect: number; createdAt: string }[];
+}
+const API = '/api';
+const math = /\$(.+?)\$/g;
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+function RichText({ text }: { text: string }) {
+  return <>{text.split(math).map((part, index) => index % 2 ? <InlineMath key={index} math={part} /> : <span key={index}>{part}</span>)}</>;
 }
 
-export default App
+function App() {
+  const [data, setData] = useState<Pathway | null>(null);
+  const [selected, setSelected] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const refresh = useCallback(async () => {
+    const response = await fetch(`${API}/pathway`);
+    if (!response.ok) throw new Error('No se pudo cargar tu ruta de aprendizaje.');
+    setData(await response.json() as Pathway);
+  }, []);
+  useEffect(() => { refresh().catch(() => setError('No se pudo conectar con el servidor. Intenta recargar la página.')).finally(() => setLoading(false)); }, [refresh]);
+
+  async function send(path: string, body?: object) {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch(`${API}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const result = await response.json() as { error?: string; feedback?: string };
+      if (!response.ok) throw new Error(result.error ?? 'Ocurrió un error.');
+      setSelected('');
+      setFeedback(result.feedback === 'correct' ? '¡Muy bien! Respuesta correcta.' : result.feedback === 'incorrect' ? 'No es correcto. Revisemos la explicación y vuelve a intentarlo.' : result.feedback === 'theory_required' ? 'Aún no. Repasa la teoría antes de volver a intentarlo.' : '');
+      await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Ocurrió un error.'); }
+    finally { setLoading(false); }
+  }
+
+  if (loading && !data) return <main className="shell"><p className="loading">Preparando tu espacio de aprendizaje…</p></main>;
+  return <main className="shell">
+    <header className="topbar"><a className="brand" href="#" aria-label="Álgebra, inicio"><span className="brand-icon">∑</span> álgebra<span className="brand-dot">.</span></a><span className="top-label">TU ESPACIO DE APRENDIZAJE</span><span className="avatar">A</span></header>
+    <section className="hero"><div className="eyebrow"><span className="spark">✳</span> TU RUTA, A TU RITMO</div><h1>Aprender matemáticas<br /><em>puede sentirse distinto.</em></h1><p>Un paso a la vez. Si algo cuesta, aquí tienes una nueva forma de verlo.</p><div className="progress-caption"><span>Tu recorrido</span><span>{data?.topics.filter(t => t.status === 'COMPLETED').length ?? 0} de {data?.topics.length ?? 3} temas</span></div><div className="progress-track"><span style={{ width: `${((data?.topics.filter(t => t.status === 'COMPLETED').length ?? 0) / (data?.topics.length || 3)) * 100}%` }} /></div></section>
+    <div className="layout">
+      <aside className="path-card"><div className="card-heading"><div><span className="section-kicker">EL RECORRIDO</span><h2>Tu ruta de aprendizaje</h2></div><span className="topic-count">0{data?.topics.length ?? 3} temas</span></div><div className="topic-list">{data?.topics.map((topic, index) => <div className={`topic ${topic.status.toLowerCase()}`} key={topic.id}><div className="topic-marker">{topic.status === 'COMPLETED' ? '✓' : topic.status === 'LOCKED' ? '·' : `0${index + 1}`}</div><div className="topic-copy"><strong>{topic.title}</strong><span>{topic.status === 'COMPLETED' ? 'Tema completado' : topic.status === 'LOCKED' ? 'Se desbloquea al avanzar' : 'Estás aquí'}</span></div><span className="topic-status">{topic.status === 'COMPLETED' ? 'LISTO' : topic.status === 'IN_PROGRESS' ? 'AHORA' : 'PRONTO'}</span></div>)}</div><div className="aside-note"><span>✳</span><p>Cada paso cuenta. <strong>Avanza a tu manera.</strong></p></div></aside>
+      <section className="activity-card" aria-live="polite">
+        {error && <div className="error-banner" role="alert">{error}<button onClick={() => refresh().catch(() => setError('No se pudo conectar con el servidor.'))}>Reintentar</button></div>}
+        {feedback && <p className={`feedback ${feedback.startsWith('¡') ? 'good' : 'try-again'}`} role="status">{feedback}</p>}
+        {data?.progress.completed ? <div className="complete-state"><span className="activity-icon">✦</span><span className="section-kicker">RECORRIDO COMPLETADO</span><h2>¡Lo lograste!</h2><p>Has completado todos los temas de tu ruta. Cada problema que resolviste te trajo hasta aquí.</p></div>
+          : data?.progress.currentStep === 'THEORY' ? <><div className="activity-top"><div className="activity-icon theory-icon">T</div><span className="section-kicker">UN MOMENTO PARA ENTENDER</span><span className="step-count">TEORÍA · T{data.progress.currentTopicId}</span></div><h2>Volvamos a la idea, sin prisa.</h2><p className="subcopy">Una explicación puede hacer que todo encaje.</p><div className="theory-box"><span className="theory-label">LA IDEA CLAVE</span><p><RichText text={data.theory ?? ''} /></p></div><div className="hint"><span>✳</span> Cuando estés listo, prueba una actividad más.</div><button className="primary-btn" disabled={loading} onClick={() => send('theory/consult')}>Entendido, continuar <span>→</span></button></>
+          : <><div className="activity-top"><div className="activity-icon">{data?.progress.currentStep === 'REINFORCEMENT' ? 'R' : 'A'}</div><span className="section-kicker">{data?.progress.currentStep === 'REINFORCEMENT' ? 'UN POCO MÁS DE PRÁCTICA' : 'TU SIGUIENTE PASO'}</span><span className="step-count">{data?.progress.currentStep === 'REINFORCEMENT' ? 'REFUERZO' : 'ACTIVIDAD'} · {data?.progress.currentStep === 'REINFORCEMENT' ? 'R' : 'A'}{data?.progress.currentTopicId}</span></div><h2>{data?.progress.currentStep === 'REINFORCEMENT' ? 'Inténtalo con este ejercicio.' : 'Empecemos con algo concreto.'}</h2><p className="question"><RichText text={data?.activity?.prompt ?? ''} /></p><p className="select-label">ELIGE UNA RESPUESTA</p><div className="options">{data?.activity?.options.map((option, index) => <button key={option.id} className={`option ${selected === option.id ? 'selected' : ''}`} onClick={() => { setSelected(option.id); setFeedback(''); }}><span className="option-letter">{String.fromCharCode(65 + index)}</span><span className="option-text"><RichText text={option.text} /></span><span className="radio">{selected === option.id && <span />}</span></button>)}</div>          <button className="primary-btn" disabled={!selected || loading} onClick={() => send('answer', { optionId: selected })}>{loading ? 'Guardando…' : 'Comprobar respuesta'} <span>→</span></button><p className="privacy-note"><span>⌁</span> Tu progreso se guarda automáticamente.</p></>}
+      </section>
+    </div>
+    <footer><span>ÁLGEBRA <span className="brand-dot">.</span> · APRENDER, A TU RITMO</span><span>UN PASO A LA VEZ <span className="spark">✳</span></span></footer>
+  </main>;
+}
+export default App;
