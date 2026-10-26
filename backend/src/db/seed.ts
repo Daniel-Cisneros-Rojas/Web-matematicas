@@ -51,16 +51,17 @@ export function seedDatabase(db: Database.Database): void {
     if (existing.count > 0) return;
 
     const insertTopic = db.prepare('INSERT INTO topics (id, title, theory) VALUES (?, ?, ?)');
+    const insertContent = db.prepare("INSERT INTO contents (topic_id, type, body) VALUES (?, 'THEORY', ?)");
     const insertActivity = db.prepare('INSERT INTO activities (id, topic_id, type, prompt) VALUES (?, ?, ?, ?)');
     const insertOption = db.prepare('INSERT INTO options (id, activity_id, text, is_correct) VALUES (?, ?, ?, ?)');
     for (const topic of topics) {
       insertTopic.run(topic.id, topic.title, topic.theory);
+      insertContent.run(topic.id, topic.theory);
       for (const activity of [topic.main, topic.reinforcement]) {
         insertActivity.run(activity.id, topic.id, activity.type, activity.prompt);
         for (const option of activity.options) insertOption.run(option.id, activity.id, option.text, Number(option.correct));
       }
     }
-    db.prepare("INSERT INTO progress (id, current_topic_id, current_step) VALUES (1, 1, 'MAIN_ACTIVITY')").run();
   });
   seed();
 }

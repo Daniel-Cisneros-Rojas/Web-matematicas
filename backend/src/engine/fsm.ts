@@ -3,7 +3,7 @@ export type ActivityType = 'MAIN_ACTIVITY' | 'REINFORCEMENT';
 export interface ProgressState { topicId: number; step: Step; theoryViewed: boolean }
 export interface TransitionResult { next: ProgressState; completedTopicId?: number; feedback: 'correct' | 'incorrect' | 'theory_required' }
 export class DomainError extends Error {
-  constructor(public readonly status: 400 | 409 | 422, message: string) { super(message); this.name = 'DomainError'; }
+  constructor(public readonly status: 400 | 404 | 409 | 422, message: string) { super(message); this.name = 'DomainError'; }
 }
 
 export function submitAnswer(state: ProgressState, activityType: ActivityType, isCorrect: boolean, totalTopics: number): TransitionResult {
