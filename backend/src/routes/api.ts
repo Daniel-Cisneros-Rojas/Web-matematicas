@@ -31,7 +31,7 @@ export function createApi(db: Database.Database): Router {
       ORDER BY t.id
     `).all(state.topicId, userId);
     const attempts = db.prepare(`SELECT activity_id AS activityId, selected_option_id AS selectedOptionId,
-      is_correct AS isCorrect, created_at AS createdAt FROM attempt_history WHERE user_id = ? ORDER BY id`).all(userId);
+      is_correct AS isCorrect, COALESCE(timestamp, created_at) AS timestamp FROM attempt_history WHERE user_id = ? ORDER BY id`).all(userId);
     const current = state.step === 'MAIN_ACTIVITY' || state.step === 'REINFORCEMENT'
       ? db.prepare('SELECT id, type, prompt FROM activities WHERE topic_id = ? AND type = ?').get(state.topicId, state.step) as { id: string; type: string; prompt: string } | undefined
       : null;
@@ -49,7 +49,67 @@ export function createApi(db: Database.Database): Router {
   }
 
   router.get('/users', (_req, res) => {
-    res.json(db.prepare('SELECT id, name FROM users ORDER BY id').all());
+    res.json(db.prepare('SELECT id, name, role FROM users ORDER BY id').all());
+  });
+
+  router.get('/admin/dashboard/:studentId', (req, res, next) => {
+    try {
+      const adminId = Number(req.query.adminId);
+      const admin = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'ADMIN'").get(adminId);
+      if (!admin) throw new DomainError(403, 'Se requiere un usuario administrador para consultar el dashboard.');
+
+      const studentId = Number(req.params.studentId);
+      const student = db.prepare("SELECT id, name, role FROM users WHERE id = ? AND role = 'STUDENT'").get(studentId) as { id: number; name: string; role: string } | undefined;
+      if (!student) throw new DomainError(404, 'El estudiante no existe.');
+      const pathway = getPathway(studentId);
+      const totalTopics = (db.prepare('SELECT COUNT(*) AS count FROM topics').get() as { count: number }).count;
+      const completedTopics = (db.prepare('SELECT COUNT(*) AS count FROM user_completed_topics WHERE user_id = ?').get(studentId) as { count: number }).count;
+      const currentStepLabels: Record<UserProgress['step'], string> = {
+        MAIN_ACTIVITY: 'A',
+        THEORY: 'T',
+        REINFORCEMENT: 'R',
+        COMPLETED: 'COMPLETED',
+      };
+      const attempts = db.prepare(`
+        SELECT 'answer-' || ah.id AS id, t.id AS topicId, t.title AS topicTitle, a.id AS activityId,
+          a.type AS activityType, a.prompt, o.id AS optionId, o.text AS selectedOption,
+          ah.is_correct AS isCorrect, COALESCE(ah.timestamp, ah.created_at) AS timestamp,
+          CASE WHEN ah.is_correct = 1 THEN COALESCE(ah.timestamp, ah.created_at) ELSE NULL END AS completedAt,
+          (SELECT COUNT(*) FROM attempt_history prior
+            WHERE prior.user_id = ah.user_id AND prior.activity_id = ah.activity_id AND prior.id <= ah.id) AS attemptNumber
+        FROM attempt_history ah
+        JOIN activities a ON a.id = ah.activity_id
+        JOIN topics t ON t.id = a.topic_id
+        JOIN options o ON o.id = ah.selected_option_id
+        WHERE ah.user_id = ?
+        UNION ALL
+        SELECT 'theory-' || tc.id AS id, t.id AS topicId, t.title AS topicTitle, NULL AS activityId,
+          'THEORY' AS activityType, c.body AS prompt, NULL AS optionId, NULL AS selectedOption,
+          NULL AS isCorrect, tc.timestamp AS timestamp, tc.timestamp AS completedAt,
+          (SELECT COUNT(*) FROM theory_consultations prior WHERE prior.user_id = tc.user_id
+            AND prior.topic_id = tc.topic_id AND prior.id <= tc.id) AS attemptNumber
+        FROM theory_consultations tc
+        JOIN topics t ON t.id = tc.topic_id
+        JOIN contents c ON c.topic_id = t.id AND c.type = 'THEORY'
+        WHERE tc.user_id = ?
+        ORDER BY timestamp DESC
+      `).all(studentId, studentId);
+      const completedAt = (db.prepare('SELECT completed_at AS completedAt FROM student_progress WHERE user_id = ?').get(studentId) as { completedAt: string | null }).completedAt;
+      res.json({
+        student,
+        progress: {
+          percent: totalTopics === 0 ? 0 : Math.round(completedTopics / totalTopics * 100),
+          completedTopics,
+          totalTopics,
+          currentTopicId: pathway.progress.currentTopicId,
+          currentTopic: (db.prepare('SELECT title FROM topics WHERE id = ?').get(pathway.progress.currentTopicId) as { title: string } | undefined)?.title ?? null,
+          currentStep: currentStepLabels[pathway.progress.currentStep],
+          completed: pathway.progress.completed,
+          completedAt,
+        },
+        attempts,
+      });
+    } catch (error) { next(error); }
   });
 
   router.get('/progress/:userId', (req, res, next) => {
@@ -78,14 +138,15 @@ export function createApi(db: Database.Database): Router {
 
       const totalTopics = (db.prepare('SELECT COUNT(*) AS count FROM topics').get() as { count: number }).count;
       const transition = submitAnswer({ topicId: state.topicId, step: state.step, theoryViewed: Boolean(state.theoryViewed) }, activityType, Boolean(option.is_correct), totalTopics);
+      const timestamp = new Date().toISOString();
       db.transaction(() => {
-        db.prepare('INSERT INTO attempt_history (user_id, activity_id, selected_option_id, is_correct) VALUES (?, ?, ?, ?)')
-          .run(userId, activity.id, optionId, Number(option.is_correct));
+        db.prepare('INSERT INTO attempt_history (user_id, activity_id, selected_option_id, is_correct, created_at, timestamp) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(userId, activity.id, optionId, Number(option.is_correct), timestamp, timestamp);
         if (transition.completedTopicId) {
-          db.prepare('INSERT OR IGNORE INTO user_completed_topics (user_id, topic_id) VALUES (?, ?)').run(userId, transition.completedTopicId);
+          db.prepare('INSERT OR IGNORE INTO user_completed_topics (user_id, topic_id, completed_at) VALUES (?, ?, ?)').run(userId, transition.completedTopicId, timestamp);
         }
-        db.prepare('UPDATE student_progress SET current_topic_id = ?, current_step = ?, theory_viewed = ? WHERE user_id = ?')
-          .run(transition.next.topicId, transition.next.step, Number(transition.next.theoryViewed), userId);
+        db.prepare('UPDATE student_progress SET current_topic_id = ?, current_step = ?, theory_viewed = ?, completed_at = ? WHERE user_id = ?')
+          .run(transition.next.topicId, transition.next.step, Number(transition.next.theoryViewed), transition.next.step === 'COMPLETED' ? timestamp : null, userId);
       })();
       res.json({ feedback: transition.feedback, ...getPathway(userId) });
     } catch (error) { next(error); }
@@ -96,8 +157,13 @@ export function createApi(db: Database.Database): Router {
       const userId = Number(req.body?.userId);
       const state = getProgress(userId);
       const next = consultTheory({ topicId: state.topicId, step: state.step, theoryViewed: Boolean(state.theoryViewed) });
-      db.prepare('UPDATE student_progress SET current_step = ?, theory_viewed = ? WHERE user_id = ?')
-        .run(next.step, Number(next.theoryViewed), userId);
+      const timestamp = new Date().toISOString();
+      db.transaction(() => {
+        db.prepare('UPDATE student_progress SET current_step = ?, theory_viewed = ? WHERE user_id = ?')
+          .run(next.step, Number(next.theoryViewed), userId);
+        db.prepare('INSERT INTO theory_consultations (user_id, topic_id, timestamp) VALUES (?, ?, ?)')
+          .run(userId, state.topicId, timestamp);
+      })();
       res.json(getPathway(userId));
     } catch (error) { next(error); }
   });

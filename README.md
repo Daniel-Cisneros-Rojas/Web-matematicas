@@ -32,6 +32,8 @@ El servidor de desarrollo de Vite proxifica `/api` al backend en `http://localho
 
 La API ofrece `GET /api/users`, `GET /api/progress/:userId`, `POST /api/attempts` con `{ "userId": 1, "activityId": "a1", "optionId": "a1-b" }` y `POST /api/theory/consult` con `{ "userId": 1 }`.
 
+El dashboard administrativo está disponible en `GET /api/admin/dashboard/:studentId?adminId=3`; el backend valida que el `adminId` corresponda a un usuario con rol `ADMIN`. El historial registra intentos y consultas de teoría con marcas de tiempo ISO 8601.
+
 ## Pruebas y compilación
 
 Desde la raíz, `npm run test` ejecuta las pruebas del backend. También se pueden ejecutar directamente:

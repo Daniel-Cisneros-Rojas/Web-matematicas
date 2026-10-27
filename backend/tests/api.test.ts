@@ -27,10 +27,14 @@ const post = (base: string, route: string, body: object) => fetch(`${base}/${rou
 });
 
 describe('API multiusuario y persistencia', () => {
-  it('crea los dos usuarios solicitados y oculta las respuestas correctas', async () => {
+  it('crea dos estudiantes y un administrador, y oculta respuestas correctas', async () => {
     const { base } = setup();
     const users = await fetch(`${base}/users`);
-    expect(await users.json()).toEqual([{ id: 1, name: 'Daniel' }, { id: 2, name: 'Brandon' }]);
+    expect(await users.json()).toEqual([
+      { id: 1, name: 'Daniel', role: 'STUDENT' },
+      { id: 2, name: 'Brandon', role: 'STUDENT' },
+      { id: 3, name: 'Administrador', role: 'ADMIN' },
+    ]);
     const response = await fetch(`${base}/progress/1`);
     const initial = await response.json() as { activity: { id: string; options: object[] } };
     expect(initial.activity.id).toBe('a1');
@@ -60,6 +64,11 @@ describe('API multiusuario y persistencia', () => {
     expect(consulted.status).toBe(200);
     progress = await fetch(`${base}/progress/2`);
     expect((await progress.json() as { progress: { currentStep: string }; activity: { id: string } }).progress.currentStep).toBe('REINFORCEMENT');
+    const dashboard = await fetch(`${base}/admin/dashboard/2?adminId=3`);
+    const history = await dashboard.json() as { attempts: { activityType: string; timestamp: string; isCorrect: number | null }[] };
+    expect(history.attempts.map(attempt => attempt.activityType)).toEqual(['THEORY', 'MAIN_ACTIVITY']);
+    expect(history.attempts[0]?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(history.attempts[0]?.isCorrect).toBeNull();
     const daniel = await (await fetch(`${base}/progress/1`)).json() as { progress: { currentStep: string } };
     expect(daniel.progress.currentStep).toBe('MAIN_ACTIVITY');
   });
@@ -69,6 +78,33 @@ describe('API multiusuario y persistencia', () => {
     expect((await post(base, 'attempts', { userId: 1, activityId: 'a1', optionId: 'r1-a' })).status).toBe(400);
     expect((await post(base, 'attempts', { userId: 1, activityId: 'r1', optionId: 'r1-a' })).status).toBe(409);
     expect((await fetch(`${base}/progress/99`)).status).toBe(404);
+  });
+
+  it('requiere el rol administrador y devuelve historial analítico con fechas ISO', async () => {
+    const { base } = setup();
+    const response = await post(base, 'attempts', { userId: 1, activityId: 'a1', optionId: 'a1-b' });
+    const attemptResponse = await response.json() as { attempts: { timestamp: string }[] };
+    const timestamp = attemptResponse.attempts[0]?.timestamp;
+    expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    const denied = await fetch(`${base}/admin/dashboard/1`);
+    expect(denied.status).toBe(403);
+    const adminResponse = await fetch(`${base}/admin/dashboard/1?adminId=3`);
+    expect(adminResponse.status).toBe(200);
+    const dashboard = await adminResponse.json() as {
+      progress: { percent: number; currentTopic: string; currentStep: string };
+      attempts: { activityId: string; activityType: string; selectedOption: string; isCorrect: number; timestamp: string; completedAt: string | null; attemptNumber: number }[];
+    };
+    expect(dashboard.progress).toMatchObject({ percent: 33, currentTopic: 'Ecuaciones lineales', currentStep: 'A' });
+    expect(dashboard.attempts[0]).toMatchObject({
+      activityId: 'a1',
+      activityType: 'MAIN_ACTIVITY',
+      selectedOption: '5',
+      isCorrect: 1,
+      timestamp,
+      completedAt: timestamp,
+      attemptNumber: 1,
+    });
   });
 
   it('migra el progreso existente a Daniel y mantiene el dato al reiniciar la conexión', () => {
@@ -107,9 +143,14 @@ describe('API multiusuario y persistencia', () => {
       legacy.close();
       const migrated = createDatabase(filename);
       expect(migrated.prepare('SELECT current_topic_id AS topicId FROM student_progress WHERE user_id = 1').get()).toEqual({ topicId: 2 });
-      expect(migrated.prepare('SELECT COUNT(*) AS count FROM users').get()).toEqual({ count: 2 });
+      expect(migrated.prepare('SELECT COUNT(*) AS count FROM users').get()).toEqual({ count: 3 });
+      migrated.pragma('wal_checkpoint(TRUNCATE)');
       migrated.close();
     } finally {
+      for (const suffix of ['', '-wal', '-shm']) {
+        const file = `${filename}${suffix}`;
+        if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+      }
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
