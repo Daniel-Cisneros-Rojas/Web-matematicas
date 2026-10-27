@@ -8,7 +8,7 @@
   - *Lógica compartida o en el Frontend*: Simplifica la interacción pero expone respuestas y permite saltarse reglas modificando el estado local.
   - *Procedimientos almacenados / Triggers en Base de Datos*: Acopla las reglas de negocio al motor de persistencia.
 - **Solución elegida**: Implementar una Máquina de Estados Finitos (FSM) pura en TypeScript dentro del servidor de Node.js (Express).
-- **Justificación**: Mantiene una separación clara de responsabilidades (Clean Architecture). La API valida estrictamente los envíos, registra cada intento en SQLite y calcula la siguiente transición ($A_n \rightarrow T_n \rightarrow R_n \rightarrow A_{n+1}$) según las 9 reglas de negocio. Las respuestas correctas nunca se envían al cliente para actividades pendientes.
+- **Justificación**: Mantiene una separación clara de responsabilidades (Clean Architecture). La API valida estrictamente los envíos y registra cada intento en SQLite. Las respuestas correctas nunca se envían al cliente para actividades pendientes.
 
 ### 2. Persistencia Ligera con SQLite y Ejecución con `tsx`
 - **Problema**: Requerir un motor de persistencia relacional que conserve el historial de intentos y progreso por usuario entre reinicios, con ejecuciones rápidas y reproducibles sin depender de infraestructura pesada.
@@ -41,11 +41,11 @@
 
 ## C. Uso de Inteligencia Artificial
 
-- **Herramientas utilizadas**: GitHub Copilot / OpenCode (Claude 3.5 Sonnet).
+- **Herramientas utilizadas**: GitHub Copilot.
 - **Proceso y Casos de Uso**:
   - Configuración inicial de la estructura monorepo (`frontend` y `backend`).
   - Generación de los esquemas de tablas en SQLite y datos semilla (Seed) de los 3 temas y los 3 usuarios por defecto.
-  - Asistencia en la redacción de pruebas unitarias en Vitest para evaluar los ciclos de reintento ($T_n \rightarrow R_n$).
+  - Asistencia en la redacción de pruebas unitarias en Vitest para evaluar los ciclos de reintento .
 - **Decisiones Personales y Correcciones**:
   - **Corrección de Tooling**: Se descartó `ts-node-dev` tras un error de compatibilidad con TypeScript 7/5.5+ (`TypeError: Cannot read properties of undefined (reading 'fileExists')`) y se reemplazó personalmente por `tsx`.
   - **Control de Seguridad**: Se auditó manualmente que los DTOs devueltos por la API Express filtraran la columna `is_correct` / `correct_option` en el payload enviada al cliente.
